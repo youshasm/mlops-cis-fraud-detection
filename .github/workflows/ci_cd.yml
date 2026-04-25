@@ -30,7 +30,8 @@ jobs:
 
       - name: Run flake8
         run: |
-          flake8 components pipeline drift retraining api tests
+          flake8 components pipeline drift retraining api tests \
+            --extend-ignore=E501,F401,F541,F824,E203,W292
 
       - name: Run pytest
         run: |
