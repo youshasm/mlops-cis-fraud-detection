@@ -1,0 +1,27 @@
+# Local GitHub Actions runner files (contains binaries and credentials)
+actions-runner/
+
+# Python cache/venv
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Local outputs/artifacts
+outputs/models/
+outputs/data/
+
+# Dataset files (too large for git/GitHub)
+data/*.csv
+data/*.zip
+data/*.parquet
+data/*.pkl
+
+# Local documents and archives
+*.zip
+*.pdf

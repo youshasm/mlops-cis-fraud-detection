@@ -1,0 +1,21 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+.pytest_cache
+.mypy_cache
+.venv
+venv
+.env
+.git
+.gitignore
+Assignment 4.pdf
+data/*.csv
+data/*.zip
+data/*.parquet
+data/*.pkl
+outputs/data/*.csv
+outputs/models/*.pkl
+outputs/plots/*.png
+outputs/plots/shap/*.png

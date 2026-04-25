@@ -1,0 +1,165 @@
+name: fraud-detection-mlops
+
+services:
+  mlops-run:
+    build:
+      context: .
+      target: training
+    image: fraud-detection-mlops:training
+    container_name: fraud-detection-mlops
+    command:
+      - /bin/sh
+      - -c
+      - |
+        python components/data_ingestion.py --transaction-path data/train_transaction.csv --identity-path data/train_identity.csv --output-path outputs/data/raw_data.csv
+        python components/data_validation.py --input-path outputs/data/raw_data.csv --output-path outputs/validation_report.txt
+        python components/preprocessing.py --input-path outputs/data/raw_data.csv --output-path outputs/data/processed_data.csv
+        python components/feature_engineering.py --input-path outputs/data/processed_data.csv --output-path outputs/data/featured_data.csv
+        python components/train.py --input-path outputs/data/featured_data.csv --model-dir outputs/models
+        python components/evaluate.py --input-path outputs/data/featured_data.csv --model-dir outputs/models --report-path outputs/evaluation_report.txt --plot-dir outputs/plots
+        python components/explainability.py --input-path outputs/data/featured_data.csv --model-path outputs/models/best_model.pkl --output-dir outputs/plots/shap
+    volumes:
+      - ./:/app
+
+  ingest:
+    build:
+      context: .
+      target: training
+    image: fraud-detection-mlops:training
+    command: >
+      python components/data_ingestion.py
+      --transaction-path data/train_transaction.csv
+      --identity-path data/train_identity.csv
+      --output-path outputs/data/raw_data.csv
+    volumes:
+      - ./:/app
+    profiles: ["pipeline"]
+
+  validate:
+    image: fraud-detection-mlops:training
+    build:
+      context: .
+      target: training
+    command: >
+      python components/data_validation.py
+      --input-path outputs/data/raw_data.csv
+      --output-path outputs/validation_report.txt
+    volumes:
+      - ./:/app
+    profiles: ["pipeline"]
+    depends_on:
+      - ingest
+
+  preprocess:
+    image: fraud-detection-mlops:training
+    build:
+      context: .
+      target: training
+    command: >
+      python components/preprocessing.py
+      --input-path outputs/data/raw_data.csv
+      --output-path outputs/data/processed_data.csv
+    volumes:
+      - ./:/app
+    profiles: ["pipeline"]
+    depends_on:
+      - validate
+
+  feature_engineer:
+    image: fraud-detection-mlops:training
+    build:
+      context: .
+      target: training
+    command: >
+      python components/feature_engineering.py
+      --input-path outputs/data/processed_data.csv
+      --output-path outputs/data/featured_data.csv
+    volumes:
+      - ./:/app
+    profiles: ["pipeline"]
+    depends_on:
+      - preprocess
+
+  train:
+    image: fraud-detection-mlops:training
+    build:
+      context: .
+      target: training
+    command: >
+      python components/train.py
+      --input-path outputs/data/featured_data.csv
+      --model-dir outputs/models
+    volumes:
+      - ./:/app
+    profiles: ["pipeline"]
+    depends_on:
+      - feature_engineer
+
+  evaluate:
+    image: fraud-detection-mlops:training
+    build:
+      context: .
+      target: training
+    command: >
+      python components/evaluate.py
+      --input-path outputs/data/featured_data.csv
+      --model-dir outputs/models
+      --report-path outputs/evaluation_report.txt
+      --plot-dir outputs/plots
+    volumes:
+      - ./:/app
+    profiles: ["pipeline"]
+    depends_on:
+      - train
+
+  explainability:
+    image: fraud-detection-mlops:training
+    build:
+      context: .
+      target: training
+    command: >
+      python components/explainability.py
+      --input-path outputs/data/featured_data.csv
+      --model-path outputs/models/best_model.pkl
+      --output-dir outputs/plots/shap
+    volumes:
+      - ./:/app
+    profiles: ["pipeline"]
+    depends_on:
+      - evaluate
+
+  api:
+    build:
+      context: .
+      target: inference
+    image: fraud-detection-mlops:inference
+    ports:
+      - '8000:8000'
+    volumes:
+      - ./outputs/models:/app/outputs/models:ro
+    environment:
+      MODEL_PATH: /app/outputs/models/best_model.pkl
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - api
+
+volumes:
+  model-cache:

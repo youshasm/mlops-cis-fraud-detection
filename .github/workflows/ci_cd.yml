@@ -1,0 +1,196 @@
+name: fraud-detection-mlops
+
+on:
+  push:
+  pull_request:
+  repository_dispatch:
+    types:
+      - fraud_recall_drop
+      - fraud_drift_exceeded
+  workflow_dispatch:
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run flake8
+        run: |
+          flake8 components pipeline drift retraining api tests
+
+      - name: Run pytest
+        run: |
+          pytest -q
+
+      - name: Run schema validation
+        run: |
+          python components/data_ingestion.py --transaction-path data/train_transaction.csv --identity-path data/train_identity.csv --output-path outputs/data/raw_data.csv
+          python components/data_validation.py --input-path outputs/data/raw_data.csv --output-path outputs/validation_report.txt
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push training image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: training
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/fraud-detection-training:latest
+
+      - name: Build and push inference image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: inference
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/fraud-detection-inference:latest
+
+  cd:
+    name: CD
+    runs-on: [self-hosted, Windows, X64]
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile Kubeflow pipeline
+        run: |
+          python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
+
+      - name: Trigger Kubeflow pipeline on local Docker Desktop
+        env:
+          KUBEFLOW_HOST: ${{ secrets.KUBEFLOW_HOST }}
+          KUBEFLOW_TOKEN: ${{ secrets.KUBEFLOW_TOKEN }}
+        run: |
+          $hostUrl = $env:KUBEFLOW_HOST
+          if (-not $hostUrl) {
+            $hostUrl = "http://127.0.0.1:8080"
+          }
+
+          $portForward = Start-Process -FilePath "kubectl" -ArgumentList "port-forward svc/ml-pipeline-ui -n kubeflow 8080:80" -PassThru -WindowStyle Hidden
+
+          $ready = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              Invoke-WebRequest -Uri "http://127.0.0.1:8080" -UseBasicParsing -TimeoutSec 2 | Out-Null
+              $ready = $true
+              break
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+
+          if (-not $ready) {
+            if ($portForward -and -not $portForward.HasExited) {
+              Stop-Process -Id $portForward.Id -Force
+            }
+            throw "kubectl port-forward to Kubeflow UI failed"
+          }
+
+          python -c "import os; from kfp import Client; host=os.getenv('KUBEFLOW_HOST') or 'http://127.0.0.1:8080'; token=os.getenv('KUBEFLOW_TOKEN') or None; client=Client(host=host, existing_token=token) if token else Client(host=host); client.create_run_from_pipeline_package(pipeline_file='outputs/pipeline.yaml', arguments={'transaction_path':'data/train_transaction.csv','identity_path':'data/train_identity.csv','namespace':'fraud-detection'}, namespace='fraud-detection')"
+
+          if ($portForward -and -not $portForward.HasExited) {
+            Stop-Process -Id $portForward.Id -Force
+          }
+
+  intelligent-trigger:
+    name: Intelligent Trigger
+    runs-on: [self-hosted, Windows, X64]
+    if: github.event_name == 'repository_dispatch'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile Kubeflow pipeline
+        run: |
+          python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
+
+      - name: Re-trigger Kubeflow pipeline from alertmanager webhook
+        env:
+          KUBEFLOW_HOST: ${{ secrets.KUBEFLOW_HOST }}
+          KUBEFLOW_TOKEN: ${{ secrets.KUBEFLOW_TOKEN }}
+        run: |
+          $hostUrl = $env:KUBEFLOW_HOST
+          if (-not $hostUrl) {
+            $hostUrl = "http://127.0.0.1:8080"
+          }
+
+          $portForward = Start-Process -FilePath "kubectl" -ArgumentList "port-forward svc/ml-pipeline-ui -n kubeflow 8080:80" -PassThru -WindowStyle Hidden
+
+          $ready = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              Invoke-WebRequest -Uri "http://127.0.0.1:8080" -UseBasicParsing -TimeoutSec 2 | Out-Null
+              $ready = $true
+              break
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+
+          if (-not $ready) {
+            if ($portForward -and -not $portForward.HasExited) {
+              Stop-Process -Id $portForward.Id -Force
+            }
+            throw "kubectl port-forward to Kubeflow UI failed"
+          }
+
+          python -c "import os; from kfp import Client; host=os.getenv('KUBEFLOW_HOST') or 'http://127.0.0.1:8080'; token=os.getenv('KUBEFLOW_TOKEN') or None; client=Client(host=host, existing_token=token) if token else Client(host=host); client.create_run_from_pipeline_package(pipeline_file='outputs/pipeline.yaml', arguments={'transaction_path':'data/train_transaction.csv','identity_path':'data/train_identity.csv','namespace':'fraud-detection'}, namespace='fraud-detection')"
+
+          if ($portForward -and -not $portForward.HasExited) {
+            Stop-Process -Id $portForward.Id -Force
+          }
