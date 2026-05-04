@@ -38,36 +38,13 @@ steps:
       flake8 components pipeline drift retraining api tests \
         --extend-ignore=E501,F401,F541,F824,E203,W292
 
-  - name: Debug imports
-    run: |
-      python -c "import sys; print('\n'.join(sys.path))"
-      python -c "import components; print('components OK')" || echo "components import failed"
-
   - name: Test
     run: python -m pytest tests/ -v
 
   - name: Schema validation
     run: |
-      python - <<EOF
-```
+      python -c "import os, pandas as pd; os.makedirs('data', exist_ok=True); pd.DataFrame({'TransactionID':[1,2,3],'TransactionDT':[1000,2000,3000],'isFraud':[0,1,0],'TransactionAmt':[10.0,20.0,30.0]}).to_csv('data/train_transaction.csv', index=False); pd.DataFrame({'TransactionID':[1,2,3],'DeviceType':['desktop','mobile','desktop']}).to_csv('data/train_identity.csv', index=False)"
 
-import os, pandas as pd
-os.makedirs('data', exist_ok=True)
-
-pd.DataFrame({
-'TransactionID':[1,2,3],
-'TransactionDT':[1000,2000,3000],
-'isFraud':[0,1,0],
-'TransactionAmt':[10.0,20.0,30.0]
-}).to_csv('data/train_transaction.csv', index=False)
-
-pd.DataFrame({
-'TransactionID':[1,2,3],
-'DeviceType':['desktop','mobile','desktop']
-}).to_csv('data/train_identity.csv', index=False)
-EOF
-
-```
       python components/data_ingestion.py \
         --transaction-path data/train_transaction.csv \
         --identity-path data/train_identity.csv \
@@ -99,7 +76,7 @@ steps:
       username: ${{ github.actor }}
       password: ${{ secrets.GITHUB_TOKEN }}
 
-  - name: Build & push training image
+  - name: Build training image
     uses: docker/build-push-action@v6
     with:
       context: .
@@ -108,7 +85,7 @@ steps:
       push: true
       tags: ghcr.io/${{ github.repository_owner }}/fraud-detection-training:latest
 
-  - name: Build & push inference image
+  - name: Build inference image
     uses: docker/build-push-action@v6
     with:
       context: .
@@ -163,35 +140,6 @@ $yaml | kubectl apply -f -
 
 ```
       python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
-
-  - name: Trigger Kubeflow pipeline
-    shell: pwsh
-    env:
-      KUBEFLOW_HOST: ${{ secrets.KUBEFLOW_HOST }}
-      KUBEFLOW_TOKEN: ${{ secrets.KUBEFLOW_TOKEN }}
-    run: |
-      $hostUrl = $env:KUBEFLOW_HOST
-      if (-not $hostUrl) { $hostUrl = "http://127.0.0.1:8080" }
-
-      $pf = Start-Process kubectl -ArgumentList "port-forward svc/ml-pipeline-ui -n kubeflow 8080:80" -PassThru -WindowStyle Hidden
-
-      $ready = $false
-      for ($i = 0; $i -lt 20; $i++) {
-        try {
-          Invoke-WebRequest "http://127.0.0.1:8080" -TimeoutSec 2 | Out-Null
-          $ready = $true
-          break
-        } catch { Start-Sleep 1 }
-      }
-
-      if (-not $ready) {
-        if ($pf -and -not $pf.HasExited) { Stop-Process $pf.Id -Force }
-        throw "Kubeflow not reachable"
-      }
-
-      python -c "import os; from kfp import Client; host=os.getenv('KUBEFLOW_HOST') or 'http://127.0.0.1:8080'; token=os.getenv('KUBEFLOW_TOKEN'); client=Client(host=host, existing_token=token) if token else Client(host=host); client.create_run_from_pipeline_package('outputs/pipeline.yaml', arguments={'transaction_path':'data/train_transaction.csv','identity_path':'data/train_identity.csv','namespace':'fraud-detection'}, namespace='fraud-detection')"
-
-      if ($pf -and -not $pf.HasExited) { Stop-Process $pf.Id -Force }
 ```
 
 intelligent-trigger:
@@ -238,33 +186,4 @@ $yaml | kubectl apply -f -
 
 ```
       python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
-
-  - name: Re-trigger Kubeflow pipeline
-    shell: pwsh
-    env:
-      KUBEFLOW_HOST: ${{ secrets.KUBEFLOW_HOST }}
-      KUBEFLOW_TOKEN: ${{ secrets.KUBEFLOW_TOKEN }}
-    run: |
-      $hostUrl = $env:KUBEFLOW_HOST
-      if (-not $hostUrl) { $hostUrl = "http://127.0.0.1:8080" }
-
-      $pf = Start-Process kubectl -ArgumentList "port-forward svc/ml-pipeline-ui -n kubeflow 8080:80" -PassThru -WindowStyle Hidden
-
-      $ready = $false
-      for ($i = 0; $i -lt 20; $i++) {
-        try {
-          Invoke-WebRequest "http://127.0.0.1:8080" -TimeoutSec 2 | Out-Null
-          $ready = $true
-          break
-        } catch { Start-Sleep 1 }
-      }
-
-      if (-not $ready) {
-        if ($pf -and -not $pf.HasExited) { Stop-Process $pf.Id -Force }
-        throw "Kubeflow not reachable"
-      }
-
-      python -c "import os; from kfp import Client; host=os.getenv('KUBEFLOW_HOST') or 'http://127.0.0.1:8080'; token=os.getenv('KUBEFLOW_TOKEN'); client=Client(host=host, existing_token=token) if token else Client(host=host); client.create_run_from_pipeline_package('outputs/pipeline.yaml', arguments={'transaction_path':'data/train_transaction.csv','identity_path':'data/train_identity.csv','namespace':'fraud-detection'}, namespace='fraud-detection')"
-
-      if ($pf -and -not $pf.HasExited) { Stop-Process $pf.Id -Force }
 ```
