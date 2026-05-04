@@ -1,306 +1,257 @@
 # IEEE CIS Fraud Detection MLOps Pipeline
 
-Production-grade MLOps project for the IEEE CIS Fraud Detection dataset using Kubeflow Pipelines v2, XGBoost, LightGBM, scikit-learn, SHAP, Prometheus, FastAPI, Docker, and GitHub Actions.
+End-to-end fraud detection MLOps project using Kubeflow Pipelines v2, XGBoost/LightGBM/RandomForest, SHAP, Prometheus, Grafana, and GitHub Actions.
 
-Container-first setup is supported via Docker Compose. You can run everything in isolated containers without installing Python packages on your host.
+This README is focused on:
+- Kubeflow execution (primary path)
+- GitHub Actions with self-hosted runner (`.\\run.cmd`)
+- Prometheus and Grafana setup
 
-## Project Overview
+## 1) Prerequisites
 
-This repository implements an end-to-end fraud detection workflow:
-
-- Data ingestion and validation
-- Preprocessing and feature engineering
-- Model training and evaluation
-- SHAP explainability
-- Drift simulation and retraining strategy analysis
-- Kubeflow pipeline orchestration
-- Prometheus monitoring and GitHub Actions CI/CD
-
-## Repository Layout
-
-```text
-fraud-detection-mlops/
-├── .github/workflows/ci_cd.yml
-├── api/
-│   ├── __init__.py
-│   └── main.py
-├── components/
-│   ├── __init__.py
-│   ├── data_ingestion.py
-│   ├── data_validation.py
-│   ├── preprocessing.py
-│   ├── feature_engineering.py
-│   ├── train.py
-│   ├── evaluate.py
-│   └── explainability.py
-├── data/
-│   ├── train_transaction.csv
-│   ├── train_identity.csv
-│   ├── test_transaction.csv
-│   ├── test_identity.csv
-│   └── sample_submission.csv
-├── drift/
-│   ├── __init__.py
-│   └── drift_simulation.py
-├── monitoring/
-│   ├── alert_rules.yml
-│   └── prometheus.yml
-├── outputs/
-│   ├── data/
-│   ├── models/
-│   ├── plots/
-│   └── pipeline.yaml
-├── pipeline/
-│   ├── __init__.py
-│   └── kubeflow_pipeline.py
-├── retraining/
-│   ├── __init__.py
-│   └── retraining_strategy.py
-├── tests/
-│   └── test_components.py
-├── Dockerfile
-├── README.md
-└── requirements.txt
-```
-
-## Prerequisites
-
+- Windows with PowerShell
 - Python 3.10+
-- Kubeflow Pipelines v2 running locally or remotely
-- Docker Desktop
-- Docker Compose v2 (`docker compose`)
-- IEEE CIS Fraud Detection CSV files in the `data/` folder
+- Kubernetes cluster (Docker Desktop Kubernetes is OK)
+- Kubeflow Pipelines installed and accessible
+- `kubectl` configured
+- Dataset files inside `data/`:
+  - `train_transaction.csv`
+  - `train_identity.csv`
+  - `test_transaction.csv`
+  - `test_identity.csv`
+  - `sample_submission.csv`
 
-## Quick Start (Docker-Only, Isolated)
-
-1. Run the full data-to-model workflow in one container:
-
-```bash
-docker compose up --build mlops-run
-```
-
-2. Start inference API and Prometheus:
-
-```bash
-docker compose up --build api prometheus
-```
-
-3. Verify services:
-
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/metrics
-```
-
-4. Open Prometheus UI:
-
-```text
-http://localhost:9090
-```
-
-## Installation (Optional Local Development)
-
-Create and activate a virtual environment, then install dependencies:
+Install Python dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-If your environment does not already have the optional packages installed, install them before running the SHAP, LightGBM, or imbalanced-learn steps.
+## 2) Verify Project Structure
 
-## Compose Services
+Expected important folders/files:
 
-The `docker-compose.yml` file defines two service groups.
+```text
+.github/workflows/ci_cd.yml
+components/
+pipeline/kubeflow_pipeline.py
+monitoring/prometheus.yml
+monitoring/alert_rules.yml
+monitoring/alertmanager.yml
+monitoring/grafana/
+data/
+outputs/
+```
 
-- `pipeline` profile services:
-	- `mlops-run` (recommended, runs all component scripts sequentially)
-	- `ingest`, `validate`, `preprocess`, `feature_engineer`, `train`, `evaluate`, `explainability` (advanced, step-by-step containers)
-- always-on services: `api`, `prometheus`
+## 3) Kubeflow Pipeline: Complete Step-by-Step
 
-Compose project name is set to `fraud-detection-mlops` in `docker-compose.yml`.
+### Step 3.1: Ensure Kubeflow is reachable
 
-All batch containers write outputs to `outputs/` in the project folder.
+```bash
+kubectl get pods -n kubeflow
+```
 
-## Execution Model (Important)
+If using local UI access:
 
-There are two separate execution paths:
+```bash
+kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8080:80
+```
 
-1. Docker Compose component flow
-- Runs Python scripts directly from `components/`.
-- No Kubeflow required.
-- Good for local isolated development.
+Open: `http://127.0.0.1:8080`
 
-2. Kubeflow DSL pipeline flow
-- Uses `@dsl.component` and `@dsl.pipeline` in `pipeline/kubeflow_pipeline.py`.
-- Requires your Kubernetes/Kubeflow cluster.
-- Compile with:
+### Step 3.2: Create/verify shared PVC
+
+```bash
+kubectl apply -f pipeline/fraud-detection-pvc.yaml
+kubectl get pvc -n kubeflow
+```
+
+### Step 3.3: Copy CSV files to PVC (required by pipeline pods)
+
+Use your helper pod (already used in your setup):
+
+```bash
+kubectl exec -n kubeflow pvc-copy-helper -- sh -c "mkdir -p /mnt/shared/data"
+kubectl cp "data/train_transaction.csv" kubeflow/pvc-copy-helper:/mnt/shared/data/
+kubectl cp "data/train_identity.csv" kubeflow/pvc-copy-helper:/mnt/shared/data/
+kubectl cp "data/test_transaction.csv" kubeflow/pvc-copy-helper:/mnt/shared/data/
+kubectl cp "data/test_identity.csv" kubeflow/pvc-copy-helper:/mnt/shared/data/
+kubectl cp "data/sample_submission.csv" kubeflow/pvc-copy-helper:/mnt/shared/data/
+kubectl exec -n kubeflow pvc-copy-helper -- sh -c "ls -lh /mnt/shared/data"
+```
+
+### Step 3.4: Compile pipeline YAML
 
 ```bash
 python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
 ```
 
-These two flows are complementary, but they do not run automatically one before the other.
+### Step 3.5: Submit a run
 
-## End-to-End Workflow
-
-Run the scripts in this order:
-
-1. Ingest raw tables
+Use your submission helper script:
 
 ```bash
-python components/data_ingestion.py --transaction-path data/train_transaction.csv --identity-path data/train_identity.csv --output-path outputs/data/raw_data.csv
+python submit_fixed_run.py
 ```
 
-2. Validate the merged dataset
+### Step 3.6: Monitor run status
 
 ```bash
-python components/data_validation.py --input-path outputs/data/raw_data.csv --output-path outputs/validation_report.txt
+python check_run_status.py
+kubectl get pods -n kubeflow | Select-String "fraud-detection-mlops|NAME"
 ```
 
-3. Preprocess the data
+Pipeline steps executed sequentially:
+1. ingest
+2. validate
+3. preprocess
+4. feature_engineer
+5. train
+6. evaluate
+7. conditional_deploy (only if AUC-ROC > 0.85)
+
+### Step 3.7: Clean old failed pods (optional)
 
 ```bash
-python components/preprocessing.py --input-path outputs/data/raw_data.csv --output-path outputs/data/processed_data.csv
+$failedPods = kubectl get pods -n kubeflow --no-headers | Where-Object { $_ -match 'fraud-detection-mlops' -and ($_ -match '\\sError\\s' -or $_ -match '\\sOOMKilled\\s') } | ForEach-Object { ($_ -split '\\s+')[0] }
+$failedPods | ForEach-Object { kubectl delete pod -n kubeflow $_ --ignore-not-found=true }
 ```
 
-4. Engineer features
+## 4) GitHub Actions: Self-Hosted Runner (`.\\run.cmd`)
+
+### Step 4.1: Create required repository secrets
+
+In GitHub repo: **Settings > Secrets and variables > Actions > New repository secret**
+
+Add at least:
+- `KUBEFLOW_HOST` = `http://127.0.0.1:8080` (or your cluster endpoint)
+- `KUBEFLOW_NAMESPACE` = `fraud-detection`
+- `GHCR_PAT` = GitHub Personal Access Token with package push permissions (if workflow pushes to GHCR)
+- `GITHUB_TOKEN` is auto-provided by GitHub Actions (no manual secret needed)
+
+Optional for alert-based retraining:
+- `ALERT_WEBHOOK_URL`
+
+### Step 4.2: Create and register the self-hosted runner
+
+In GitHub repo: **Settings > Actions > Runners > New self-hosted runner**
+
+Download and configure runner from GitHub instructions, then start it from runner folder:
+
+```powershell
+.\run.cmd
+```
+
+Keep this terminal open while jobs run.
+
+### Step 4.3: Verify labels in workflow
+
+Open `.github/workflows/ci_cd.yml` and confirm `runs-on` matches your runner labels.
+
+Example:
+
+```yaml
+runs-on: [self-hosted, windows]
+```
+
+### Step 4.4: Trigger workflow
+
+Option A: push to branch configured in workflow trigger.
 
 ```bash
-python components/feature_engineering.py --input-path outputs/data/processed_data.csv --output-path outputs/data/featured_data.csv
+git add .
+git commit -m "Trigger CI/CD"
+git push origin main
 ```
 
-5. Train models
+Option B: run manually from GitHub UI (**Actions > workflow > Run workflow**).
+
+### Step 4.5: Watch job logs
+
+- GitHub UI: **Actions > selected run > job > step logs**
+- Runner terminal (`.\\run.cmd`) shows real-time execution on your machine
+
+### Step 4.6: Confirm CD stage submitted Kubeflow run
+
+After CD job success:
 
 ```bash
-python components/train.py --input-path outputs/data/featured_data.csv --model-dir outputs/models
+python check_run_status.py
 ```
 
-6. Evaluate the trained models
+Also verify in Kubeflow UI: `http://127.0.0.1:8080`
+
+## 5) Prometheus (Docker)
+
+Only monitoring services use Docker here.
+
+### Step 5.1: Start Prometheus
 
 ```bash
-python components/evaluate.py --input-path outputs/data/featured_data.csv --model-dir outputs/models --report-path outputs/evaluation_report.txt --plot-dir outputs/plots
+docker run -d --name prometheus -p 9090:9090 -v "${PWD}/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:latest --config.file=/etc/prometheus/prometheus.yml
 ```
 
-7. Generate SHAP explainability outputs
+Open:
+- `http://localhost:9090`
+- `http://localhost:9090/targets`
+- `http://localhost:9090/alerts`
+
+### Step 5.2: Reload config/rules after edits
 
 ```bash
-python components/explainability.py --input-path outputs/data/featured_data.csv --model-path outputs/models/best_model.pkl --output-dir outputs/plots/shap
+curl -X POST http://localhost:9090/-/reload
 ```
 
-## Kubeflow Pipeline (DSL)
+### Step 5.3: Useful queries
 
-Yes, DSL components and pipeline are implemented in `pipeline/kubeflow_pipeline.py`.
+```promql
+model_fraud_recall
+model_false_positive_rate
+rate(http_requests_total{status=~"5.."}[5m])
+histogram_quantile(0.95, http_request_duration_seconds_bucket)
+```
 
-Compile the pipeline package:
+## 6) Grafana (Docker)
+
+### Step 6.1: Start Grafana with provisioning
 
 ```bash
-python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
+docker run -d --name grafana -p 3000:3000 -v "${PWD}/monitoring/grafana/provisioning:/etc/grafana/provisioning" -v "${PWD}/monitoring/grafana/dashboards:/var/lib/grafana/dashboards" grafana/grafana:latest
 ```
 
-The DSL pipeline uses:
+Open: `http://localhost:3000`
 
-- `@dsl.pipeline` and `@dsl.component` from KFP v2
-- Artifact passing between steps
-- Retry enabled on each component
-- A conditional deploy step gated on AUC-ROC > 0.85
-- A persistent volume claim for shared artifacts
-- Target namespace `fraud-detection`
+Default login:
+- Username: `admin`
+- Password: `admin`
 
-## Monitoring and API
+### Step 6.2: Verify dashboards
 
-Start the FastAPI service:
+Expected dashboards:
+- `system_health.json`
+- `model_performance.json`
+- `data_drift.json`
 
-```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8000
-```
+### Step 6.3: Verify datasource
 
-Available endpoints:
+Datasource provisioning file:
+- `monitoring/grafana/provisioning/datasources/prometheus.yml`
 
-- `GET /health`
-- `POST /predict`
-- `GET /metrics`
+Dashboard provisioning file:
+- `monitoring/grafana/provisioning/dashboards/dashboards.yml`
 
-Prometheus scrapes the `/metrics` endpoint using `monitoring/prometheus.yml`, and alert rules are defined in `monitoring/alert_rules.yml`.
+If datasource is not auto-loaded, add Prometheus manually with URL:
+- `http://host.docker.internal:9090`
 
-## Drift Simulation
+## 7) GitHub Actions + Monitoring Integration (Optional)
 
-Run the drift experiment:
+- Prometheus evaluates alerts from `monitoring/alert_rules.yml`
+- Alertmanager routes events based on `monitoring/alertmanager.yml`
+- Alert bridge can send webhook/repository_dispatch to trigger retraining workflow
 
-```bash
-python drift/drift_simulation.py --input-path outputs/data/featured_data.csv
-```
+## 8) Outputs
 
-This splits the data by `TransactionDT`, injects label drift on high-value transactions, and prints a before/after comparison table.
-
-## Retraining Strategy
-
-Run the retraining simulation:
-
-```bash
-python retraining/retraining_strategy.py --input-path outputs/data/featured_data.csv
-```
-
-This compares a simple periodic retraining approach against the hybrid strategy that retrains weekly and triggers immediately when recall falls below 0.80.
-
-## Docker
-
-Build the image:
-
-```bash
-docker build -t fraud-detection-mlops .
-```
-
-The Dockerfile provides a multi-stage build for training and a lightweight FastAPI inference stage with a healthcheck.
-
-Run the full containerized stack with Docker Compose:
-
-```bash
-docker compose up --build api prometheus
-```
-
-Run the pipeline stages as containers:
-
-```bash
-docker compose --profile pipeline up --build ingest validate preprocess feature_engineer train evaluate explainability
-```
-
-Recommended simplified command:
-
-```bash
-docker compose up --build mlops-run
-```
-
-The Compose file uses the same training image for all batch steps and a separate inference image for the API.
-
-Useful container commands:
-
-```bash
-# Start only monitoring and inference
-docker compose up --build api prometheus
-
-# Run one full batch flow
-docker compose up --build mlops-run
-
-# Run one batch stage (advanced)
-docker compose --profile pipeline run --rm train
-
-# Stop and remove running services
-docker compose down
-```
-
-## CI/CD
-
-The GitHub Actions workflow in `.github/workflows/ci_cd.yml` includes:
-
-- CI: flake8, pytest, and schema validation
-- Build: Docker image build and push to GHCR
-- CD: Kubeflow pipeline trigger via KFP v2 client
-- Intelligent trigger: webhook-driven pipeline retriggering from monitoring alerts
-
-## Outputs
-
-Generated artifacts are written under `outputs/`:
-
+Main generated outputs:
 - `outputs/data/raw_data.csv`
 - `outputs/data/processed_data.csv`
 - `outputs/data/featured_data.csv`
@@ -311,16 +262,10 @@ Generated artifacts are written under `outputs/`:
 - `outputs/plots/shap/`
 - `outputs/pipeline.yaml`
 
-## Troubleshooting
+## 9) Quick Troubleshooting
 
-- If `best_model.pkl` is missing, run the pipeline profile at least through the `train` service.
-- If API starts but `/predict` fails, confirm feature columns match the trained model input schema.
-- If Prometheus has no targets, verify the API container is healthy and `http://api:8000/metrics` is reachable from inside the Compose network.
-- If Kubeflow submission fails in CI/CD, verify `KUBEFLOW_HOST` and `KUBEFLOW_TOKEN` repository secrets.
-
-## Notes
-
-- All scripts expose command-line arguments through `argparse`.
-- File I/O and model operations are wrapped with error handling.
-- Several optional dependencies are loaded dynamically so the scripts remain runnable even in lean environments.
-- The included tests are smoke tests and are intended to validate the main helper functions quickly.
+- Kubeflow run stuck at ingest: verify CSV files exist in `/mnt/shared/data` inside PVC.
+- Frequent OOMKilled pods: reduce memory usage in ingest/preprocess or increase cluster resources.
+- GitHub self-hosted job not picked: ensure runner terminal with `.\\run.cmd` is online and labels match workflow.
+- Prometheus shows down target: verify endpoint path `/metrics` and network reachability.
+- Grafana empty panels: check Prometheus datasource URL and time range.
