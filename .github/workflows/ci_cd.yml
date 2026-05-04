@@ -12,10 +12,10 @@ on:
 jobs:
   ci:
     name: CI
-      runs-on: ubuntu-latest
-      env:
-        PYTHONPATH: ${{ github.workspace }}
-      if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
 
 ```
 steps:
