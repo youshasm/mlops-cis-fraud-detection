@@ -1,0 +1,44 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Feature Drift Score",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "data_drift_score", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Missing Value Ratio",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "input_missing_ratio", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Input Anomaly Count",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "input_anomaly_count", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Drift Alert Threshold",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "data_drift_score > bool 0.3", "refId": "A"}
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["fraud", "drift"],
+  "title": "Data Drift Dashboard",
+  "version": 1
+}

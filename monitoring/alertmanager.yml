@@ -1,0 +1,14 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: github-actions-webhook
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 5m
+
+receivers:
+  - name: github-actions-webhook
+    webhook_configs:
+      - url: http://alert-bridge:5001/alert
+        send_resolved: true

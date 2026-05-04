@@ -160,6 +160,45 @@ services:
       - '--web.enable-lifecycle'
     depends_on:
       - api
+      - alertmanager
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    ports:
+      - '9093:9093'
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+
+  alert-bridge:
+    build:
+      context: .
+      target: training
+    image: fraud-detection-mlops:training
+    command: >
+      python monitoring/alert_to_github_dispatch.py
+      --host 0.0.0.0
+      --port 5001
+    environment:
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-youshasm/mlops-cis-fraud-detection}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    ports:
+      - '5001:5001'
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    ports:
+      - '3000:3000'
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
 
 volumes:
   model-cache:

@@ -1,0 +1,46 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Fraud Recall Trend",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "fraud_recall", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "False Positive Rate Trend",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "false_positive_rate", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Precision and Recall",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "fraud_precision", "legendFormat": "Precision", "refId": "A"},
+        {"expr": "fraud_recall", "legendFormat": "Recall", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Detection Rate and Confidence",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "fraud_detection_rate", "legendFormat": "Detection Rate", "refId": "A"},
+        {"expr": "histogram_quantile(0.5, sum(rate(fraud_api_prediction_confidence_bucket[5m])) by (le))", "legendFormat": "Confidence p50", "refId": "B"}
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["fraud", "model"],
+  "title": "Model Performance Dashboard",
+  "version": 1
+}

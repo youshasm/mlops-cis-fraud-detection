@@ -6,6 +6,7 @@ lightgbm==4.5.0
 imbalanced-learn==0.12.3
 shap==0.46.0
 kfp==2.8.0
+kfp-kubernetes==1.2.0
 prometheus-client==0.21.0
 fastapi==0.115.6
 uvicorn==0.34.0

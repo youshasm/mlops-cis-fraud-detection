@@ -1,0 +1,45 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "API Latency p95 (s)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(fraud_api_request_latency_seconds_bucket[5m])) by (le))", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Request Throughput (req/s)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "sum(rate(fraud_api_requests_total[1m]))", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Error Rate",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "sum(rate(fraud_api_errors_total[5m])) / clamp_min(sum(rate(fraud_api_requests_total[5m])), 1e-6)", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU and Memory Usage",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "cpu_usage_percent", "legendFormat": "CPU", "refId": "A"},
+        {"expr": "memory_usage_percent", "legendFormat": "Memory", "refId": "B"}
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["fraud", "system"],
+  "title": "System Health Dashboard",
+  "version": 1
+}

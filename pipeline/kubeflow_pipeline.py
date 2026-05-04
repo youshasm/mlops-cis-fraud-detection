@@ -5,13 +5,10 @@ artifact, writes to an output artifact, and the training/evaluation outputs driv
 conditional deployment when AUC-ROC exceeds 0.85.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
-from typing import List
 
-from kfp import compiler, dsl
+from kfp import compiler, dsl, kubernetes
 
 
 COMMON_PACKAGES = [
@@ -300,42 +297,68 @@ def fraud_detection_pipeline(
     namespace: str = "fraud-detection",
 ) -> None:
     """Define the fraud detection pipeline."""
-    shared_volume = dsl.PipelineVolume(pvc="fraud-detection-pvc")
-
     ingest_task = ingest_component(transaction_path=transaction_path, identity_path=identity_path)
     ingest_task.set_retry(2)
-    ingest_task.add_pvolumes({"/mnt/shared": shared_volume})
+    kubernetes.mount_pvc(
+        ingest_task,
+        pvc_name="fraud-detection-pvc",
+        mount_path="/mnt/shared",
+    )
 
     validate_task = validate_component(raw_data=ingest_task.outputs["raw_data"])
     validate_task.set_retry(2)
-    validate_task.add_pvolumes({"/mnt/shared": shared_volume})
+    kubernetes.mount_pvc(
+        validate_task,
+        pvc_name="fraud-detection-pvc",
+        mount_path="/mnt/shared",
+    )
 
     preprocess_task = preprocess_component(raw_data=ingest_task.outputs["raw_data"])
     preprocess_task.set_retry(2)
-    preprocess_task.add_pvolumes({"/mnt/shared": shared_volume})
+    kubernetes.mount_pvc(
+        preprocess_task,
+        pvc_name="fraud-detection-pvc",
+        mount_path="/mnt/shared",
+    )
 
     feature_task = feature_engineer_component(processed_data=preprocess_task.outputs["processed_data"])
     feature_task.set_retry(2)
-    feature_task.add_pvolumes({"/mnt/shared": shared_volume})
+    kubernetes.mount_pvc(
+        feature_task,
+        pvc_name="fraud-detection-pvc",
+        mount_path="/mnt/shared",
+    )
 
     train_task = train_component(featured_data=feature_task.outputs["featured_data"])
     train_task.set_retry(2)
-    train_task.add_pvolumes({"/mnt/shared": shared_volume})
+    kubernetes.mount_pvc(
+        train_task,
+        pvc_name="fraud-detection-pvc",
+        mount_path="/mnt/shared",
+    )
 
     evaluate_task = evaluate_component(
         featured_data=feature_task.outputs["featured_data"],
         model_artifact=train_task.outputs["model_artifact"],
     )
     evaluate_task.set_retry(2)
-    evaluate_task.add_pvolumes({"/mnt/shared": shared_volume})
+    kubernetes.mount_pvc(
+        evaluate_task,
+        pvc_name="fraud-detection-pvc",
+        mount_path="/mnt/shared",
+    )
 
-    with dsl.Condition(evaluate_task.output > 0.85):
+    with dsl.Condition(evaluate_task.outputs["Output"] > 0.85):
         deploy_task = deploy_component(
             model_artifact=train_task.outputs["model_artifact"],
             evaluation_report=evaluate_task.outputs["evaluation_report"],
         )
         deploy_task.set_retry(2)
-        deploy_task.add_pvolumes({"/mnt/shared": shared_volume})
+        kubernetes.mount_pvc(
+            deploy_task,
+            pvc_name="fraud-detection-pvc",
+            mount_path="/mnt/shared",
+        )
 
 
 def parse_args() -> argparse.Namespace:

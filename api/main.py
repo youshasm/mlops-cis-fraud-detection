@@ -68,6 +68,11 @@ CONFIDENCE = Histogram(
 )
 RECALL_GAUGE = Gauge("fraud_recall", "Observed fraud recall from feedback")
 FALSE_POSITIVE_RATE = Gauge("false_positive_rate", "Observed false positive rate from feedback")
+PRECISION_GAUGE = Gauge("fraud_precision", "Observed fraud precision from feedback")
+DETECTION_RATE = Gauge("fraud_detection_rate", "Observed fraction of positive fraud predictions")
+DRIFT_GAUGE = Gauge("data_drift_score", "Current data drift score")
+MISSING_RATIO_GAUGE = Gauge("input_missing_ratio", "Share of missing input values")
+ANOMALY_COUNT_GAUGE = Gauge("input_anomaly_count", "Input anomaly count from validation")
 CPU_GAUGE = Gauge("cpu_usage_percent", "CPU utilization percentage")
 MEMORY_GAUGE = Gauge("memory_usage_percent", "Memory utilization percentage")
 
@@ -105,6 +110,27 @@ def predict(records: List[Dict[str, Any]]) -> Dict[str, Any]:
             raise HTTPException(status_code=503, detail="Model is not loaded")
 
         frame = pd.DataFrame(records)
+
+        metadata_fields = [
+            "_data_drift_score",
+            "_input_missing_ratio",
+            "_input_anomaly_count",
+        ]
+        for field in metadata_fields:
+            if field in frame.columns and not frame[field].empty:
+                value = pd.to_numeric(frame[field], errors="coerce").dropna()
+                if not value.empty:
+                    if field == "_data_drift_score":
+                        DRIFT_GAUGE.set(float(value.iloc[0]))
+                    elif field == "_input_missing_ratio":
+                        MISSING_RATIO_GAUGE.set(float(value.iloc[0]))
+                    elif field == "_input_anomaly_count":
+                        ANOMALY_COUNT_GAUGE.set(float(value.iloc[0]))
+
+        helper_columns = [column for column in frame.columns if column.startswith("_")]
+        if helper_columns:
+            frame = frame.drop(columns=helper_columns)
+
         labels = None
         if "isFraud" in frame.columns:
             labels = frame["isFraud"].astype(int).to_numpy()
@@ -119,6 +145,9 @@ def predict(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         for confidence in confidences:
             CONFIDENCE.observe(float(confidence))
 
+        detection_rate = float(np.asarray(predictions).mean()) if len(predictions) else 0.0
+        DETECTION_RATE.set(detection_rate)
+
         if labels is not None:
             actual = labels
             predicted = np.asarray(predictions, dtype=int)
@@ -126,8 +155,10 @@ def predict(records: List[Dict[str, Any]]) -> Dict[str, Any]:
             fp = int(((predicted == 1) & (actual == 0)).sum())
             fn = int(((predicted == 0) & (actual == 1)).sum())
             recall = tp / (tp + fn) if (tp + fn) else 0.0
+            precision = tp / (tp + fp) if (tp + fp) else 0.0
             false_positive_rate = fp / max(int((actual == 0).sum()), 1)
             RECALL_GAUGE.set(recall)
+            PRECISION_GAUGE.set(precision)
             FALSE_POSITIVE_RATE.set(false_positive_rate)
 
         CPU_GAUGE.set(process.cpu_percent(interval=None))
