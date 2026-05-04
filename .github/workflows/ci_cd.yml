@@ -103,12 +103,12 @@ jobs:
           pip install -r requirements.txt
 
       - name: Ensure Kubeflow PVC
-        shell: pwsh
-        run: |
-          $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
+  shell: pwsh
+  run: |
+    $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
 
-          if (-not $pvc) {
-            kubectl apply -f - <<EOF
+    if (-not $pvc) {
+      $yaml = @"
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -120,8 +120,10 @@ spec:
   resources:
     requests:
       storage: 10Gi
-EOF
-          }
+"@
+
+      $yaml | kubectl apply -f -
+    }
 
       - name: Compile Kubeflow pipeline
         shell: pwsh
@@ -146,13 +148,13 @@ EOF
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Ensure Kubeflow PVC
-        shell: pwsh
-        run: |
-          $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
+      -- name: Ensure Kubeflow PVC
+  shell: pwsh
+  run: |
+    $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
 
-          if (-not $pvc) {
-            kubectl apply -f - <<EOF
+    if (-not $pvc) {
+      $yaml = @"
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -164,10 +166,7 @@ spec:
   resources:
     requests:
       storage: 10Gi
-EOF
-          }
+"@
 
-      - name: Compile Kubeflow pipeline
-        shell: pwsh
-        run: |
-          python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
+      $yaml | kubectl apply -f -
+    }
