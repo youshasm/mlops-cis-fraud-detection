@@ -1,0 +1,699 @@
+# PIPELINE DEFINITION
+# Name: fraud-detection-mlops
+# Description: IEEE CIS fraud detection MLOps pipeline
+# Inputs:
+#    identity_path: str [Default: 'data/train_identity.csv']
+#    namespace: str [Default: 'fraud-detection']
+#    transaction_path: str [Default: 'data/train_transaction.csv']
+components:
+  comp-condition-1:
+    dag:
+      tasks:
+        deploy-component:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-deploy-component
+          inputs:
+            artifacts:
+              evaluation_report:
+                componentInputArtifact: pipelinechannel--evaluate-component-evaluation_report
+              model_artifact:
+                componentInputArtifact: pipelinechannel--train-component-model_artifact
+          retryPolicy:
+            backoffDuration: 0s
+            backoffFactor: 2.0
+            backoffMaxDuration: 3600s
+            maxRetryCount: 2
+          taskInfo:
+            name: deploy-component
+    inputDefinitions:
+      artifacts:
+        pipelinechannel--evaluate-component-evaluation_report:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        pipelinechannel--train-component-model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        pipelinechannel--evaluate-component-Output:
+          parameterType: NUMBER_DOUBLE
+  comp-deploy-component:
+    executorLabel: exec-deploy-component
+    inputDefinitions:
+      artifacts:
+        evaluation_report:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        deployment_manifest:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-evaluate-component:
+    executorLabel: exec-evaluate-component
+    inputDefinitions:
+      artifacts:
+        featured_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        evaluation_report:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+  comp-feature-engineer-component:
+    executorLabel: exec-feature-engineer-component
+    inputDefinitions:
+      artifacts:
+        processed_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        featured_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-ingest-component:
+    executorLabel: exec-ingest-component
+    inputDefinitions:
+      parameters:
+        identity_path:
+          parameterType: STRING
+        transaction_path:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        raw_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-preprocess-component:
+    executorLabel: exec-preprocess-component
+    inputDefinitions:
+      artifacts:
+        raw_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        processed_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-component:
+    executorLabel: exec-train-component
+    inputDefinitions:
+      artifacts:
+        featured_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        training_report:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-validate-component:
+    executorLabel: exec-validate-component
+    inputDefinitions:
+      artifacts:
+        raw_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        validation_report:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-deploy-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - deploy_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.8.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' 'xgboost' 'joblib' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef deploy_component(\n    model_artifact: dsl.Input[dsl.Model],\n\
+          \    evaluation_report: dsl.Input[dsl.Dataset],\n    deployment_manifest:\
+          \ dsl.Output[dsl.Dataset],\n) -> None:\n    \"\"\"Simulate conditional deployment\
+          \ for the best model.\"\"\"\n    import os\n\n    print(\"=\" * 50)\n  \
+          \  print(\"Kubeflow conditional deployment step\")\n    print(\"=\" * 50)\n\
+          \n    with open(evaluation_report.path, \"r\", encoding=\"utf-8\") as handle:\n\
+          \        report = handle.read()\n    os.makedirs(os.path.dirname(deployment_manifest.path),\
+          \ exist_ok=True)\n    with open(deployment_manifest.path, \"w\", encoding=\"\
+          utf-8\") as handle:\n        handle.write(\"Deployment triggered for model\
+          \ artifact: \" + model_artifact.path + \"\\n\")\n        handle.write(report)\n\
+          \    print(f\"Deployment manifest written to {deployment_manifest.path}\"\
+          )\n\n"
+        image: python:3.10
+    exec-evaluate-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.8.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' 'xgboost' 'joblib' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate_component(\n    featured_data: dsl.Input[dsl.Dataset],\n\
+          \    model_artifact: dsl.Input[dsl.Model],\n    evaluation_report: dsl.Output[dsl.Dataset],\n\
+          ) -> float:\n    \"\"\"Evaluate the trained model and emit the AUC-ROC for\
+          \ deployment gating.\"\"\"\n    import os\n\n    import joblib\n    import\
+          \ pandas as pd\n    from sklearn.metrics import confusion_matrix, f1_score,\
+          \ precision_score, recall_score, roc_auc_score\n    from sklearn.model_selection\
+          \ import train_test_split\n\n    print(\"=\" * 50)\n    print(\"Kubeflow\
+          \ evaluate step\")\n    print(\"=\" * 50)\n\n    frame = pd.read_csv(featured_data.path)\n\
+          \    y = frame[\"isFraud\"].astype(int)\n    X = frame.drop(columns=[\"\
+          isFraud\"])\n    _, X_test, _, y_test = train_test_split(X, y, test_size=0.2,\
+          \ random_state=42, stratify=y)\n    model = joblib.load(model_artifact.path)\n\
+          \    probabilities = model.predict_proba(X_test)[:, 1]\n    predictions\
+          \ = (probabilities >= 0.5).astype(int)\n    tn, fp, fn, tp = confusion_matrix(y_test,\
+          \ predictions).ravel()\n    auc_score = roc_auc_score(y_test, probabilities)\n\
+          \    report = [\n        f\"Precision: {precision_score(y_test, predictions,\
+          \ zero_division=0):.4f}\",\n        f\"Recall: {recall_score(y_test, predictions,\
+          \ zero_division=0):.4f}\",\n        f\"F1: {f1_score(y_test, predictions,\
+          \ zero_division=0):.4f}\",\n        f\"AUC-ROC: {auc_score:.4f}\",\n   \
+          \     f\"Confusion matrix: TN={tn}, FP={fp}, FN={fn}, TP={tp}\",\n    ]\n\
+          \    os.makedirs(os.path.dirname(evaluation_report.path), exist_ok=True)\n\
+          \    with open(evaluation_report.path, \"w\", encoding=\"utf-8\") as handle:\n\
+          \        handle.write(\"\\n\".join(report))\n    print(\"\\n\".join(report))\n\
+          \    return float(auc_score)\n\n"
+        image: python:3.10
+    exec-feature-engineer-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - feature_engineer_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.8.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' 'xgboost' 'joblib' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef feature_engineer_component(\n    processed_data: dsl.Input[dsl.Dataset],\n\
+          \    featured_data: dsl.Output[dsl.Dataset],\n) -> None:\n    \"\"\"Create\
+          \ target-encoded and temporal fraud features.\"\"\"\n    import os\n\n \
+          \   import numpy as np\n    import pandas as pd\n    from sklearn.preprocessing\
+          \ import StandardScaler\n\n    print(\"=\" * 50)\n    print(\"Kubeflow feature\
+          \ engineering step\")\n    print(\"=\" * 50)\n\n    frame = pd.read_csv(processed_data.path)\n\
+          \    target = frame[\"isFraud\"] if \"isFraud\" in frame.columns else None\n\
+          \    high_cardinality = [\"card1\", \"card2\", \"addr1\", \"addr2\", \"\
+          P_emaildomain\", \"R_emaildomain\"]\n    if target is not None:\n      \
+          \  global_mean = target.mean()\n        for column in high_cardinality:\n\
+          \            if column in frame.columns:\n                series = frame[column].astype(str)\n\
+          \                stats = frame.groupby(series)[\"isFraud\"].agg([\"mean\"\
+          , \"count\"])\n                frame[f\"{column}_target_encoded\"] = series.map(\n\
+          \                    (stats[\"mean\"] * stats[\"count\"] + global_mean *\
+          \ 20.0) / (stats[\"count\"] + 20.0)\n                ).fillna(global_mean)\n\
+          \    if \"TransactionDT\" in frame.columns:\n        transaction_dt = pd.to_numeric(frame[\"\
+          TransactionDT\"], errors=\"coerce\").fillna(0)\n        frame[\"transaction_hour\"\
+          ] = ((transaction_dt // 3600) % 24).astype(int)\n        frame[\"transaction_day\"\
+          ] = (transaction_dt // 86400).astype(int)\n    numeric_columns = [column\
+          \ for column in frame.select_dtypes(include=[np.number]).columns if column\
+          \ != \"isFraud\"]\n    if numeric_columns:\n        frame[numeric_columns]\
+          \ = StandardScaler().fit_transform(frame[numeric_columns])\n    os.makedirs(os.path.dirname(featured_data.path),\
+          \ exist_ok=True)\n    frame.to_csv(featured_data.path, index=False)\n  \
+          \  print(f\"Featured data saved to {featured_data.path}\")\n\n"
+        image: python:3.10
+    exec-ingest-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - ingest_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.8.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' 'xgboost' 'joblib' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef ingest_component(\n    transaction_path: str,\n    identity_path:\
+          \ str,\n    raw_data: dsl.Output[dsl.Dataset],\n) -> None:\n    \"\"\"Merge\
+          \ raw transaction and identity tables.\"\"\"\n    import os\n\n    import\
+          \ pandas as pd\n\n    print(\"=\" * 50)\n    print(\"Kubeflow ingest step\"\
+          )\n    print(\"=\" * 50)\n\n    transactions = pd.read_csv(transaction_path)\n\
+          \    identities = pd.read_csv(identity_path)\n    merged = transactions.merge(identities,\
+          \ on=\"TransactionID\", how=\"left\")\n    os.makedirs(os.path.dirname(raw_data.path),\
+          \ exist_ok=True)\n    merged.to_csv(raw_data.path, index=False)\n    print(f\"\
+          Merged data saved to {raw_data.path}\")\n\n"
+        image: python:3.10
+    exec-preprocess-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocess_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.8.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' 'xgboost' 'joblib' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocess_component(\n    raw_data: dsl.Input[dsl.Dataset],\n\
+          \    processed_data: dsl.Output[dsl.Dataset],\n) -> None:\n    \"\"\"Clean\
+          \ and impute the raw dataset.\"\"\"\n    import os\n\n    import numpy as\
+          \ np\n    import pandas as pd\n    from sklearn.impute import KNNImputer,\
+          \ SimpleImputer\n\n    print(\"=\" * 50)\n    print(\"Kubeflow preprocess\
+          \ step\")\n    print(\"=\" * 50)\n\n    frame = pd.read_csv(raw_data.path)\n\
+          \    sparse_columns = frame.columns[frame.isna().mean() > 0.5]\n    frame\
+          \ = frame.drop(columns=sparse_columns)\n    numeric_columns = frame.select_dtypes(include=[np.number]).columns.tolist()\n\
+          \    categorical_columns = [column for column in frame.columns if column\
+          \ not in numeric_columns]\n    if numeric_columns:\n        frame[numeric_columns]\
+          \ = SimpleImputer(strategy=\"median\").fit_transform(frame[numeric_columns])\n\
+          \        top_columns = numeric_columns[: min(10, len(numeric_columns))]\n\
+          \        frame[top_columns] = KNNImputer(n_neighbors=5).fit_transform(frame[top_columns])\n\
+          \    if categorical_columns:\n        frame[categorical_columns] = SimpleImputer(strategy=\"\
+          most_frequent\").fit_transform(frame[categorical_columns])\n    os.makedirs(os.path.dirname(processed_data.path),\
+          \ exist_ok=True)\n    frame.to_csv(processed_data.path, index=False)\n \
+          \   print(f\"Processed data saved to {processed_data.path}\")\n\n"
+        image: python:3.10
+    exec-train-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.8.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' 'xgboost' 'joblib' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_component(\n    featured_data: dsl.Input[dsl.Dataset],\n\
+          \    model_artifact: dsl.Output[dsl.Model],\n    training_report: dsl.Output[dsl.Dataset],\n\
+          ) -> None:\n    \"\"\"Train a best model from the engineered data.\"\"\"\
+          \n    import json\n    import os\n\n    import joblib\n    import numpy\
+          \ as np\n    import pandas as pd\n    from sklearn.compose import ColumnTransformer\n\
+          \    from sklearn.ensemble import RandomForestClassifier\n    from sklearn.feature_selection\
+          \ import SelectFromModel\n    from sklearn.impute import SimpleImputer\n\
+          \    from sklearn.metrics import roc_auc_score\n    from sklearn.model_selection\
+          \ import train_test_split\n    from sklearn.pipeline import Pipeline\n \
+          \   from sklearn.preprocessing import OneHotEncoder\n    from xgboost import\
+          \ XGBClassifier\n\n    print(\"=\" * 50)\n    print(\"Kubeflow train step\"\
+          )\n    print(\"=\" * 50)\n\n    frame = pd.read_csv(featured_data.path)\n\
+          \    y = frame[\"isFraud\"].astype(int)\n    X = frame.drop(columns=[\"\
+          isFraud\"])\n    X_train, X_test, y_train, y_test = train_test_split(X,\
+          \ y, test_size=0.2, random_state=42, stratify=y)\n    numeric_columns =\
+          \ X_train.select_dtypes(include=[np.number]).columns.tolist()\n    categorical_columns\
+          \ = [column for column in X_train.columns if column not in numeric_columns]\n\
+          \    preprocessor = ColumnTransformer(\n        transformers=[\n       \
+          \     (\"num\", SimpleImputer(strategy=\"median\"), numeric_columns),\n\
+          \            (\n                \"cat\",\n                Pipeline(\n  \
+          \                  steps=[\n                        (\"imputer\", SimpleImputer(strategy=\"\
+          most_frequent\")),\n                        (\"encoder\", OneHotEncoder(handle_unknown=\"\
+          ignore\")),\n                    ]\n                ),\n               \
+          \ categorical_columns,\n            ),\n        ]\n    )\n\n    models =\
+          \ {\n        \"xgboost\": Pipeline([\n            (\"preprocessor\", preprocessor),\n\
+          \            (\"model\", XGBClassifier(eval_metric=\"logloss\", tree_method=\"\
+          hist\", n_estimators=150, random_state=42)),\n        ]),\n        \"random_forest\"\
+          : Pipeline([\n            (\"preprocessor\", preprocessor),\n          \
+          \  (\"selector\", SelectFromModel(RandomForestClassifier(n_estimators=100,\
+          \ random_state=42))),\n            (\"model\", RandomForestClassifier(n_estimators=200,\
+          \ random_state=42)),\n        ]),\n    }\n\n    results = []\n    fitted_models\
+          \ = {}\n    for name, pipeline in models.items():\n        pipeline.fit(X_train,\
+          \ y_train)\n        probabilities = pipeline.predict_proba(X_test)[:, 1]\n\
+          \        auc_score = roc_auc_score(y_test, probabilities)\n        results.append({\"\
+          model\": name, \"auc_roc\": auc_score})\n        fitted_models[name] = pipeline\n\
+          \n    best_name = max(results, key=lambda item: item[\"auc_roc\"])[\"model\"\
+          ]\n    best_model = fitted_models[best_name]\n    os.makedirs(os.path.dirname(model_artifact.path),\
+          \ exist_ok=True)\n    joblib.dump(best_model, model_artifact.path)\n   \
+          \ with open(training_report.path, \"w\", encoding=\"utf-8\") as handle:\n\
+          \        json.dump(results, handle, indent=2)\n    print(f\"Best model:\
+          \ {best_name}\")\n    print(f\"Model saved to {model_artifact.path}\")\n\
+          \n"
+        image: python:3.10
+    exec-validate-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - validate_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.8.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' 'xgboost' 'joblib' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef validate_component(\n    raw_data: dsl.Input[dsl.Dataset],\n\
+          \    validation_report: dsl.Output[dsl.Dataset],\n) -> None:\n    \"\"\"\
+          Validate the raw merged dataset.\"\"\"\n    import os\n\n    import pandas\
+          \ as pd\n\n    print(\"=\" * 50)\n    print(\"Kubeflow validate step\")\n\
+          \    print(\"=\" * 50)\n\n    frame = pd.read_csv(raw_data.path)\n    missing\
+          \ = (frame.isna().mean() * 100).sort_values(ascending=False)\n    flagged\
+          \ = missing[missing > 50]\n    lines = [\n        \"Validation report\"\
+          ,\n        f\"Shape: {frame.shape}\",\n        \"Missing value percentages:\"\
+          ,\n        missing.to_string(),\n        \"Columns with >50% missing:\"\
+          ,\n        flagged.to_string() if not flagged.empty else \"None\",\n   \
+          \     f\"Class distribution: {frame['isFraud'].value_counts(dropna=False).to_dict()\
+          \ if 'isFraud' in frame.columns else 'unavailable'}\",\n    ]\n    os.makedirs(os.path.dirname(validation_report.path),\
+          \ exist_ok=True)\n    with open(validation_report.path, \"w\", encoding=\"\
+          utf-8\") as handle:\n        handle.write(\"\\n\".join(lines))\n    print(f\"\
+          Validation report saved to {validation_report.path}\")\n\n"
+        image: python:3.10
+pipelineInfo:
+  description: IEEE CIS fraud detection MLOps pipeline
+  name: fraud-detection-mlops
+root:
+  dag:
+    tasks:
+      condition-1:
+        componentRef:
+          name: comp-condition-1
+        dependentTasks:
+        - evaluate-component
+        - train-component
+        inputs:
+          artifacts:
+            pipelinechannel--evaluate-component-evaluation_report:
+              taskOutputArtifact:
+                outputArtifactKey: evaluation_report
+                producerTask: evaluate-component
+            pipelinechannel--train-component-model_artifact:
+              taskOutputArtifact:
+                outputArtifactKey: model_artifact
+                producerTask: train-component
+          parameters:
+            pipelinechannel--evaluate-component-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: evaluate-component
+        taskInfo:
+          name: condition-1
+        triggerPolicy:
+          condition: inputs.parameter_values['pipelinechannel--evaluate-component-Output']
+            > 0.85
+      evaluate-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate-component
+        dependentTasks:
+        - feature-engineer-component
+        - train-component
+        inputs:
+          artifacts:
+            featured_data:
+              taskOutputArtifact:
+                outputArtifactKey: featured_data
+                producerTask: feature-engineer-component
+            model_artifact:
+              taskOutputArtifact:
+                outputArtifactKey: model_artifact
+                producerTask: train-component
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: evaluate-component
+      feature-engineer-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-feature-engineer-component
+        dependentTasks:
+        - preprocess-component
+        inputs:
+          artifacts:
+            processed_data:
+              taskOutputArtifact:
+                outputArtifactKey: processed_data
+                producerTask: preprocess-component
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: feature-engineer-component
+      ingest-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-ingest-component
+        inputs:
+          parameters:
+            identity_path:
+              componentInputParameter: identity_path
+            transaction_path:
+              componentInputParameter: transaction_path
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: ingest-component
+      preprocess-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocess-component
+        dependentTasks:
+        - ingest-component
+        inputs:
+          artifacts:
+            raw_data:
+              taskOutputArtifact:
+                outputArtifactKey: raw_data
+                producerTask: ingest-component
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: preprocess-component
+      train-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-component
+        dependentTasks:
+        - feature-engineer-component
+        inputs:
+          artifacts:
+            featured_data:
+              taskOutputArtifact:
+                outputArtifactKey: featured_data
+                producerTask: feature-engineer-component
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: train-component
+      validate-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-validate-component
+        dependentTasks:
+        - ingest-component
+        inputs:
+          artifacts:
+            raw_data:
+              taskOutputArtifact:
+                outputArtifactKey: raw_data
+                producerTask: ingest-component
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: validate-component
+  inputDefinitions:
+    parameters:
+      identity_path:
+        defaultValue: data/train_identity.csv
+        isOptional: true
+        parameterType: STRING
+      namespace:
+        defaultValue: fraud-detection
+        isOptional: true
+        parameterType: STRING
+      transaction_path:
+        defaultValue: data/train_transaction.csv
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.8.0
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-deploy-component:
+          pvcMount:
+          - constant: fraud-detection-pvc
+            mountPath: /mnt/shared
+        exec-evaluate-component:
+          pvcMount:
+          - constant: fraud-detection-pvc
+            mountPath: /mnt/shared
+        exec-feature-engineer-component:
+          pvcMount:
+          - constant: fraud-detection-pvc
+            mountPath: /mnt/shared
+        exec-ingest-component:
+          pvcMount:
+          - constant: fraud-detection-pvc
+            mountPath: /mnt/shared
+        exec-preprocess-component:
+          pvcMount:
+          - constant: fraud-detection-pvc
+            mountPath: /mnt/shared
+        exec-train-component:
+          pvcMount:
+          - constant: fraud-detection-pvc
+            mountPath: /mnt/shared
+        exec-validate-component:
+          pvcMount:
+          - constant: fraud-detection-pvc
+            mountPath: /mnt/shared
