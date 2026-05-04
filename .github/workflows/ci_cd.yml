@@ -120,7 +120,7 @@ spec:
   resources:
     requests:
       storage: 10Gi
-"@
+@"
 
             $yaml | kubectl apply -f -
           }
