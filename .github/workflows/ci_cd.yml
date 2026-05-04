@@ -44,7 +44,6 @@ jobs:
         run: |
           python -c "import os, pandas as pd; os.makedirs('data', exist_ok=True); pd.DataFrame({'TransactionID':[1,2,3],'TransactionDT':[1000,2000,3000],'isFraud':[0,1,0],'TransactionAmt':[10.0,20.0,30.0]}).to_csv('data/train_transaction.csv', index=False); pd.DataFrame({'TransactionID':[1,2,3],'DeviceType':['desktop','mobile','desktop']}).to_csv('data/train_identity.csv', index=False)"
 
-
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -83,7 +82,6 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/fraud-detection-inference:latest
 
-
   cd:
     name: CD
     runs-on: [self-hosted, Windows, X64]
@@ -102,34 +100,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # FIX 1: shell and run were not indented under the step
       - name: Ensure Kubeflow PVC
-  shell: pwsh
-  run: |
-    $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
-
-    if (-not $pvc) {
-      $yaml = @"
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: fraud-detection-pvc
-  namespace: kubeflow
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-"@
-
-      $yaml | kubectl apply -f -
-    }
+        shell: pwsh
+        run: |
+          $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
+          if (-not $pvc) {
+            $yaml = @"
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: fraud-detection-pvc
+            namespace: kubeflow
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 10Gi
+          "@
+            $yaml | kubectl apply -f -
+          }
 
       - name: Compile Kubeflow pipeline
         shell: pwsh
         run: |
           python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
-
 
   intelligent-trigger:
     name: Intelligent Trigger
@@ -148,25 +144,25 @@ spec:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      -- name: Ensure Kubeflow PVC
-  shell: pwsh
-  run: |
-    $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
-
-    if (-not $pvc) {
-      $yaml = @"
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: fraud-detection-pvc
-  namespace: kubeflow
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-"@
-
-      $yaml | kubectl apply -f -
-    }
+      # FIX 2: was '-- name:' (double dash) — changed to '- name:'
+      # FIX 3: shell and run were not indented under the step
+      - name: Ensure Kubeflow PVC
+        shell: pwsh
+        run: |
+          $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
+          if (-not $pvc) {
+            $yaml = @"
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: fraud-detection-pvc
+            namespace: kubeflow
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 10Gi
+          "@
+            $yaml | kubectl apply -f -
+          }
