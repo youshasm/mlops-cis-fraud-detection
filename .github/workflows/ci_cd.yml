@@ -1,21 +1,21 @@
 name: fraud-detection-mlops
 
 on:
-push:
-pull_request:
-repository_dispatch:
-types:
-- fraud_recall_drop
-- fraud_drift_exceeded
-workflow_dispatch:
+  push:
+    pull_request:
+    repository_dispatch:
+      types:
+      - fraud_recall_drop
+      - fraud_drift_exceeded
+  workflow_dispatch:
 
 jobs:
-ci:
-name: CI
-runs-on: ubuntu-latest
-env:
-PYTHONPATH: ${{ github.workspace }}
-if: github.event_name == 'push' || github.event_name == 'pull_request'
+  ci:
+    name: CI
+      runs-on: ubuntu-latest
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+      if: github.event_name == 'push' || github.event_name == 'pull_request'
 
 ```
 steps:
