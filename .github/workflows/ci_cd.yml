@@ -13,10 +13,16 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set PYTHONPATH
+        run: |
+          echo "PYTHONPATH=${{ github.workspace }}" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,12 +39,18 @@ jobs:
           flake8 components pipeline drift retraining api tests \
             --extend-ignore=E501,F401,F541,F824,E203,W292
 
+      - name: Debug Python path
+        run: |
+          python -c "import sys; print('\\n'.join(sys.path))"
+          python -c "import components; print('components OK')" || echo "components import failed"
+
       - name: Run pytest
         run: |
-          pytest -q
+          python -m pytest tests/ -v
 
       - name: Run schema validation
         run: |
+          python -c "import os, pandas as pd; os.makedirs('data', exist_ok=True); pd.DataFrame({'TransactionID':[1,2,3], 'TransactionDT':[1000,2000,3000], 'isFraud':[0,1,0], 'TransactionAmt':[10.0,20.0,30.0]}).to_csv('data/train_transaction.csv', index=False); pd.DataFrame({'TransactionID':[1,2,3], 'DeviceType':['desktop','mobile','desktop']}).to_csv('data/train_identity.csv', index=False)"
           python components/data_ingestion.py --transaction-path data/train_transaction.csv --identity-path data/train_identity.csv --output-path outputs/data/raw_data.csv
           python components/data_validation.py --input-path outputs/data/raw_data.csv --output-path outputs/validation_report.txt
 
@@ -100,6 +112,22 @@ jobs:
 
       - name: Compile Kubeflow pipeline
         run: |
+          $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
+          if (-not $pvc) {
+            @"
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fraud-detection-pvc
+  namespace: kubeflow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+"@ | kubectl apply -f -
+          }
           python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
 
       - name: Trigger Kubeflow pipeline on local Docker Desktop
@@ -158,6 +186,22 @@ jobs:
 
       - name: Compile Kubeflow pipeline
         run: |
+          $pvc = kubectl get pvc fraud-detection-pvc -n kubeflow --ignore-not-found
+          if (-not $pvc) {
+            @"
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fraud-detection-pvc
+  namespace: kubeflow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+"@ | kubectl apply -f -
+          }
           python pipeline/kubeflow_pipeline.py --output-path outputs/pipeline.yaml
 
       - name: Re-trigger Kubeflow pipeline from alertmanager webhook
